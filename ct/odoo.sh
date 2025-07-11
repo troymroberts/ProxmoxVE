@@ -70,6 +70,127 @@ function update_script() {
   exit
 }
 
+# Override the install script to use your fork
+function install_script() {
+  if [[ "$VERBOSE" == "yes" ]]; then set -x; fi
+  if [[ "$var_os" == "debian" ]]; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update &>/dev/null
+    apt-get -y install curl &>/dev/null
+    apt-get -y install sudo &>/dev/null
+    apt-get -y install postgresql &>/dev/null
+    apt-get -y install postgresql-contrib &>/dev/null
+  elif [[ "$var_os" == "ubuntu" ]]; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update &>/dev/null
+    apt-get -y install curl &>/dev/null
+    apt-get -y install sudo &>/dev/null
+    apt-get -y install postgresql &>/dev/null
+    apt-get -y install postgresql-contrib &>/dev/null
+  fi
+  
+  export FUNCTIONS_FILE_PATH="$(curl -fsSL "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/install.func")"
+  export APPLICATION="$APP"
+  export VERBOSE="$VERBOSE"
+  export SSH_ROOT="${SSH_ROOT}"
+  export CTID="$CTID"
+  export PCT_OSTYPE="$PCT_OSTYPE"
+  export PCT_OSVERSION="$PCT_OSVERSION"
+  export PCT_DISK_SIZE="$PCT_DISK_SIZE"
+  export PCT_OPTIONS="$PCT_OPTIONS"
+  export PCT_CORES="$PCT_CORES"
+  export PCT_RAM="$PCT_RAM"
+  export PCT_PASSWORD="$PCT_PASSWORD"
+  export VMID="$VMID"
+  
+  # Use your fork's installation script with enterprise support
+  bash -c "$(curl -fsSL "https://raw.githubusercontent.com/troymroberts/ProxmoxVE/main/install/odoo-install.sh")" || exit
+}
+
+# Override build_container to use custom install script
+function build_container() {
+  if [ "$CT_TYPE" == "1" ]; then
+    FEATURES="keyctl=1,nesting=1"
+  else
+    FEATURES="nesting=1"
+  fi
+
+  if [[ $DIAGNOSTICS == "yes" ]]; then
+    post_to_api
+  fi
+
+  TEMP_DIR=$(mktemp -d)
+  pushd "$TEMP_DIR" >/dev/null
+  if [ "$var_os" == "alpine" ]; then
+    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/alpine-install.func)"
+  else
+    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/install.func)"
+  fi
+  export RANDOM_UUID="$RANDOM_UUID"
+  export CACHER="$APT_CACHER"
+  export CACHER_IP="$APT_CACHER_IP"
+  export tz="$timezone"
+  export DISABLEIPV6="$DISABLEIP6"
+  export APPLICATION="$APP"
+  export app="$NSAPP"
+  export PASSWORD="$PW"
+  export VERBOSE="$VERB"
+  export SSH_ROOT="${SSH}"
+  export SSH_AUTHORIZED_KEY
+  export CTID="$CT_ID"
+  export CTTYPE="$CT_TYPE"
+  export PCT_OSTYPE="$var_os"
+  export PCT_OSVERSION="$var_version"
+  export PCT_DISK_SIZE="$DISK_SIZE"
+  export PCT_OPTIONS="
+    -features $FEATURES
+    -hostname $HN
+    -tags $TAGS
+    $SD
+    $NS
+    -net0 name=eth0,bridge=$BRG$MAC,ip=$NET$GATE$VLAN$MTU
+    -onboot 1
+    -cores $CORE_COUNT
+    -memory $RAM_SIZE
+    -unprivileged $CT_TYPE
+    $PW
+  "
+  # This executes create_lxc.sh and creates the container and .conf file
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/create_lxc.sh)" $?
+
+  LXC_CONFIG=/etc/pve/lxc/${CTID}.conf
+  if [ "$CT_TYPE" == "0" ]; then
+    cat <<EOF >>"$LXC_CONFIG"
+# USB passthrough
+lxc.cgroup2.devices.allow: a
+lxc.cap.drop:
+lxc.cgroup2.devices.allow: c 188:* rwm
+lxc.cgroup2.devices.allow: c 189:* rwm
+lxc.mount.entry: /dev/serial/by-id  dev/serial/by-id  none bind,optional,create=dir
+lxc.mount.entry: /dev/ttyUSB0       dev/ttyUSB0       none bind,optional,create=file
+lxc.mount.entry: /dev/ttyUSB1       dev/ttyUSB1       none bind,optional,create=file
+lxc.mount.entry: /dev/ttyACM0       dev/ttyACM0       none bind,optional,create=file
+lxc.mount.entry: /dev/ttyACM1       dev/ttyACM1       none bind,optional,create=file
+EOF
+  fi
+
+  # This starts the container and executes your custom install script
+  msg_info "Starting LXC Container"
+  pct start "$CTID"
+  msg_ok "Started LXC Container"
+  if [ "$var_os" == "alpine" ]; then
+    sleep 3
+    pct exec "$CTID" -- /bin/sh -c 'cat <<EOF >/etc/apk/repositories
+http://dl-cdn.alpinelinux.org/alpine/latest-stable/main
+http://dl-cdn.alpinelinux.org/alpine/latest-stable/community
+EOF'
+    pct exec "$CTID" -- ash -c "apk add bash >/dev/null"
+  fi
+  
+  # Use your fork's install script
+  lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/troymroberts/ProxmoxVE/main/install/odoo-install.sh)" $?
+}
+
 start
 build_container
 description
