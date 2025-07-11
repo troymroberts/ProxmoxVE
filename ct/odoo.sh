@@ -172,7 +172,7 @@ function update_script() {
     check_container_storage
     check_container_resources
     
-    if [[ ! -f /opt/${APP}_version.txt ]]; then
+    if [[ ! -f /opt/"${APP}"_version.txt ]]; then
         msg_error "No ${APP} Installation Found!"
         exit
     fi
@@ -188,7 +188,7 @@ function update_script() {
         if [ -d "/opt/odoo/enterprise" ]; then
             cd /opt/odoo/enterprise
             sudo -u odoo git pull
-            echo "$(date '+%Y-%m-%d')-enterprise" > /opt/${APP}_version.txt
+            echo "$(date '+%Y-%m-%d')-enterprise" > /opt/"${APP}"_version.txt
         fi
         
         systemctl restart odoo
@@ -202,11 +202,11 @@ function update_script() {
           sort -V |
           tail -n1)
         
-        if [[ "${LATEST_VERSION}" != "$(cat /opt/${APP}_version.txt)" ]]; then
+        if [[ "${LATEST_VERSION}" != "$(cat /opt/"${APP}"_version.txt)" ]]; then
             curl -fsSL https://nightly.odoo.com/${RELEASE}/nightly/deb/odoo_${RELEASE}.latest_all.deb -o /opt/odoo.deb
             apt install -y /opt/odoo.deb
             rm -f /opt/odoo.deb
-            echo "${LATEST_VERSION}" > /opt/${APP}_version.txt
+            echo "${LATEST_VERSION}" > /opt/"${APP}"_version.txt
             systemctl restart odoo
             msg_ok "Updated ${APP} to ${LATEST_VERSION}"
         else
@@ -217,15 +217,11 @@ function update_script() {
     exit
 }
 
-# Check if we're being called to update
-if [[ "$1" == "update" ]]; then
-    update_script
-fi
-
 start
 build_container
 description
 
 msg_ok "Completed Successfully!\n"
-echo -e "${APP} should be reachable by going to the following URL.
-         ${BL}http://${IP}:8069${CL} \n"
+echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
+echo -e "${INFO}${YW} Access it using the following URL:${CL}"
+echo -e "${TAB}${GATEWAY}${BGN}http://${IP}:8069${CL}"
