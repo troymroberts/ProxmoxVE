@@ -15,6 +15,9 @@ var_os="${var_os:-debian}"
 var_version="${var_version:-12}"
 var_unprivileged="${var_unprivileged:-1}"
 
+# Override the installation script variable to point to your fork
+var_install="troymroberts-odoo-install"
+
 header_info "$APP"
 variables
 color
@@ -70,44 +73,9 @@ function update_script() {
   exit
 }
 
-# Override the install script to use your fork
-function install_script() {
-  if [[ "$VERBOSE" == "yes" ]]; then set -x; fi
-  if [[ "$var_os" == "debian" ]]; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update &>/dev/null
-    apt-get -y install curl &>/dev/null
-    apt-get -y install sudo &>/dev/null
-    apt-get -y install postgresql &>/dev/null
-    apt-get -y install postgresql-contrib &>/dev/null
-  elif [[ "$var_os" == "ubuntu" ]]; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update &>/dev/null
-    apt-get -y install curl &>/dev/null
-    apt-get -y install sudo &>/dev/null
-    apt-get -y install postgresql &>/dev/null
-    apt-get -y install postgresql-contrib &>/dev/null
-  fi
-  
-  export FUNCTIONS_FILE_PATH="$(curl -fsSL "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/install.func")"
-  export APPLICATION="$APP"
-  export VERBOSE="$VERBOSE"
-  export SSH_ROOT="${SSH_ROOT}"
-  export CTID="$CTID"
-  export PCT_OSTYPE="$PCT_OSTYPE"
-  export PCT_OSVERSION="$PCT_OSVERSION"
-  export PCT_DISK_SIZE="$PCT_DISK_SIZE"
-  export PCT_OPTIONS="$PCT_OPTIONS"
-  export PCT_CORES="$PCT_CORES"
-  export PCT_RAM="$PCT_RAM"
-  export PCT_PASSWORD="$PCT_PASSWORD"
-  export VMID="$VMID"
-  
-  # Use your fork's installation script with enterprise support
-  bash -c "$(curl -fsSL "https://raw.githubusercontent.com/troymroberts/ProxmoxVE/main/install/odoo-install.sh")" || exit
-}
+start
 
-# Override build_container to use custom install script
+# Override build_container to use your fork
 function build_container() {
   if [ "$CT_TYPE" == "1" ]; then
     FEATURES="keyctl=1,nesting=1"
@@ -191,7 +159,6 @@ EOF'
   lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/troymroberts/ProxmoxVE/main/install/odoo-install.sh)" $?
 }
 
-start
 build_container
 description
 
