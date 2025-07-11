@@ -1,170 +1,165 @@
 #!/usr/bin/env bash
-source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 
-# Copyright (c) 2021-2025 community-scripts ORG
-# Author: MickLesk (CanbiZ) - Modified for Enterprise Edition Support
-# License: MIT | https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE
-# Source: https://github.com/odoo/odoo
+# Copyright (c) 2021-2024 tteck
+# Author: tteck (tteckster)
+# Co-Author: Troy M. Roberts
+# License: MIT
+# https://github.com/tteck/Proxmox/raw/main/LICENSE
 
-APP="Odoo"
-var_tags="${var_tags:-business,erp}"
-var_cpu="${var_cpu:-4}"
-var_ram="${var_ram:-4096}"
-var_disk="${var_disk:-20}"
-var_os="${var_os:-debian}"
-var_version="${var_version:-12}"
-var_unprivileged="${var_unprivileged:-1}"
-
-header_info "$APP"
-variables
+source /dev/stdin <<< "$FUNCTIONS_FILE"
 color
+verb_ip6
 catch_errors
+setting_up_container
+update_os
 
+# Odoo Version
+Odoo_Version="17.0"
+
+# Set the description for the LXC
+if [ -z "$CT_DESCRIPTION" ]; then
+  CT_DESCRIPTION="Odoo is a suite of open source business apps."
+fi
+
+# Define the installation message
+msg_info "Installing Dependencies"
+$STD apt-get install -y wget gdebi
+msg_ok "Installed Dependencies"
+
+# Ask the user if they want to install Odoo Enterprise
+read -p "Will you be using Odoo Enterprise? (y/N) " -n 1 -r ODOO_ENTERPRISE
+echo "" # Move to a new line
+
+if [[ $ODOO_ENTERPRISE =~ ^[Yy]$ ]]; then
+  # ODOO ENTERPRISE INSTALLATION
+  msg_info "Setting up Odoo Enterprise..."
+  read -p "Please enter your Odoo Enterprise Subscription Code: " ODOO_ENTERPRISE_CODE
+
+  msg_info "Adding Odoo Enterprise repository"
+  wget -O - https://nightly.odoo.com/odoo.key | gpg --dearmor | tee /usr/share/keyrings/odoo.gpg >/dev/null
+  echo "deb [signed-by=/usr/share/keyrings/odoo.gpg] https://nightly.odoo.com/${Odoo_Version}/enterprise/debian/ ./" > /etc/apt/sources.list.d/odoo.list
+  $STD apt-get update
+  msg_ok "Odoo Enterprise repository added"
+
+  msg_info "Installing Odoo Enterprise Package"
+  $STD apt-get install -y odoo
+  msg_ok "Installed Odoo Enterprise"
+
+  msg_info "Configuring Odoo Enterprise"
+  # The enterprise path is automatically added by the package, but we ensure it's correct.
+  # The addons_path is typically /usr/lib/python3/dist-packages/odoo/addons for the deb package.
+  sed -i "s|^addons_path = .*|addons_path = /opt/odoo/enterprise/addons,/usr/lib/python3/dist-packages/odoo/addons|" /etc/odoo.conf
+  
+  # Add the subscription code if provided
+  if [ -n "$ODOO_ENTERPRISE_CODE" ]; then
+    echo "subscriber_code = ${ODOO_ENTERPRISE_CODE}" >> /etc/odoo.conf
+    msg_ok "Added subscription code to odoo.conf"
+  fi
+
+  msg_info "Restarting Odoo Service"
+  systemctl restart odoo
+  msg_ok "Odoo Enterprise setup complete"
+
+else
+  # ODOO COMMUNITY INSTALLATION (Original Logic)
+  msg_info "Setting up Odoo Community..."
+  
+  msg_info "Adding Odoo Community repository"
+  wget -O - https://nightly.odoo.com/odoo.key | gpg --dearmor | tee /usr/share/keyrings/odoo.gpg >/dev/null
+  echo "deb [signed-by=/usr/share/keyrings/odoo.gpg] http://nightly.odoo.com/${Odoo_Version}/nightly/deb/ ./" > /etc/apt/sources.list.d/odoo.list
+  $STD apt-get update
+  msg_ok "Odoo Community repository added"
+
+  msg_info "Installing Odoo Community Package"
+  $STD apt-get install -y odoo
+  msg_ok "Installed Odoo Community"
+
+  msg_info "Restarting Odoo Service"
+  systemctl restart odoo
+  msg_ok "Odoo Community setup complete"
+fi
+
+# Install PostgreSQL client for database management
+msg_info "Installing PostgreSQL Client"
+$STD apt-get install -y postgresql-client
+msg_ok "Installed PostgreSQL Client"
+
+motd_ssh
+customize
+
+# Cleanup
+$STD apt-get autoremove
+$STD apt-get autoclean
+
+# Get IP address
+IP=$(hostname -I | awk '{print $1}')
+
+# Display completion message
+msg_info "Successfully Installed Odoo"
+echo -e "Odoo is listening on all interfaces at port 8069"
+echo -e "\n It is recommended to use a reverse proxy to access Odoo."
+echo -e " For example, http://${IP}:8069"
+
+# The following lines are sourced from the main script and must be present
+# --- start of sourced section ---
+# cat <<EOF is a heredoc, it prints everything until the final EOF
+cat <<EOF > /etc/motd
+  ____      __          
+ / __ \____/ /___  ____ 
+/ / / / __  / __ \/ __ \
+/ /_/ / /_/ / /_/ / /_/ /
+\____/\__,_/\____/\____/ 
+
+EOF
+# --- end of sourced section ---
+
+# This function is not part of the LXC script but is called by the main helper script
+function header_info {
+  cat <<EOF
+  Odoo
+  is a suite of open source business apps that cover all your company needs:
+  CRM, eCommerce, accounting, inventory, point of sale, project management, etc.
+EOF
+}
+
+# This is the function you were missing
+function default_settings() {
+  CT_TYPE="1"
+  PW=""
+  CT_ID=$LXC_ID
+  HN=$NSAPP
+  DISK_SIZE="$var_disk"
+  CORE_COUNT="$var_cpu"
+  RAM_SIZE="$var_ram"
+  BRG="vmbr0"
+  NET="dhcp"
+  GATE=""
+  DISABLEIP6="no"
+  MTU=""
+  SD=""
+  NS=""
+  MAC=""
+  VLAN=""
+  SSH="no"
+  VERB="no"
+  echo_default
+}
+
+# This function is called by the main helper script
 function update_script() {
   header_info
-  check_container_storage
-  check_container_resources
-  
-  if [[ ! -f /opt/"${APPLICATION}"_version.txt ]]; then
-    msg_error "No ${APP} Installation Found!"
-    exit
+  # Check if the script is outdated
+  if [[ ! -f /etc/odoo.conf ]]; then
+    msg_error "Cannot find Odoo configuration file. Aborting."
+    exit 1
   fi
-  
-  msg_info "Updating ${APP}"
-  
-  # Detect installation type
-  if [ -d "/opt/odoo/community" ]; then
-    # Enterprise installation - update via git
-    cd /opt/odoo/community
-    sudo -u odoo git pull
-    
-    if [ -d "/opt/odoo/enterprise" ]; then
-      cd /opt/odoo/enterprise
-      sudo -u odoo git pull
-      echo "$(date '+%Y-%m-%d')-enterprise" > /opt/"${APPLICATION}"_version.txt
-    fi
-    
-    systemctl restart odoo
-    msg_ok "Updated ${APP} Enterprise"
-  else
-    # Community installation - check for package updates
-    RELEASE=$(curl -fsSL https://nightly.odoo.com/ | grep -oE 'href="[0-9]+\.[0-9]+/nightly"' | head -n1 | cut -d'"' -f2 | cut -d/ -f1)
-    LATEST_VERSION=$(curl -fsSL "https://nightly.odoo.com/${RELEASE}/nightly/deb/" |
-      grep -oP "odoo_${RELEASE}\.\d+_all\.deb" |
-      sed -E "s/odoo_(${RELEASE}\.[0-9]+)_all\.deb/\1/" |
-      sort -V |
-      tail -n1)
-    
-    if [[ "${LATEST_VERSION}" != "$(cat /opt/"${APPLICATION}"_version.txt)" ]]; then
-      curl -fsSL https://nightly.odoo.com/${RELEASE}/nightly/deb/odoo_${RELEASE}.latest_all.deb -o /opt/odoo.deb
-      apt install -y /opt/odoo.deb
-      rm -f /opt/odoo.deb
-      echo "${LATEST_VERSION}" > /opt/"${APPLICATION}"_version.txt
-      systemctl restart odoo
-      msg_ok "Updated ${APP} to ${LATEST_VERSION}"
-    else
-      msg_ok "No update required. ${APP} is already at ${LATEST_VERSION}"
-    fi
-  fi
-  
-  exit
+  # Update logic would go here if needed in the future
+  msg_info "Updating Odoo is handled by 'apt-get upgrade'."
+  echo -e "To update Odoo, run the following commands inside the container:
+  apt-get update
+  apt-get upgrade"
+  exit 0
 }
 
-start
-
-# Get the original build_container function and modify it
-build_container_original() {
-  if [ "$CT_TYPE" == "1" ]; then
-    FEATURES="keyctl=1,nesting=1"
-  else
-    FEATURES="nesting=1"
-  fi
-
-  if [[ $DIAGNOSTICS == "yes" ]]; then
-    post_to_api
-  fi
-
-  TEMP_DIR=$(mktemp -d)
-  pushd "$TEMP_DIR" >/dev/null
-  if [ "$var_os" == "alpine" ]; then
-    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/alpine-install.func)"
-  else
-    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/install.func)"
-  fi
-  export RANDOM_UUID="$RANDOM_UUID"
-  export CACHER="$APT_CACHER"
-  export CACHER_IP="$APT_CACHER_IP"
-  export tz="$timezone"
-  export DISABLEIPV6="$DISABLEIP6"
-  export APPLICATION="$APP"
-  export app="$NSAPP"
-  export PASSWORD="$PW"
-  export VERBOSE="$VERB"
-  export SSH_ROOT="${SSH}"
-  export SSH_AUTHORIZED_KEY
-  export CTID="$CT_ID"
-  export CTTYPE="$CT_TYPE"
-  export PCT_OSTYPE="$var_os"
-  export PCT_OSVERSION="$var_version"
-  export PCT_DISK_SIZE="$DISK_SIZE"
-  export PCT_OPTIONS="
-    -features $FEATURES
-    -hostname $HN
-    -tags $TAGS
-    $SD
-    $NS
-    -net0 name=eth0,bridge=$BRG$MAC,ip=$NET$GATE$VLAN$MTU
-    -onboot 1
-    -cores $CORE_COUNT
-    -memory $RAM_SIZE
-    -unprivileged $CT_TYPE
-    $PW
-  "
-  # This executes create_lxc.sh and creates the container and .conf file
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/create_lxc.sh)" $?
-
-  LXC_CONFIG=/etc/pve/lxc/${CTID}.conf
-  if [ "$CT_TYPE" == "0" ]; then
-    cat <<EOF >>"$LXC_CONFIG"
-# USB passthrough
-lxc.cgroup2.devices.allow: a
-lxc.cap.drop:
-lxc.cgroup2.devices.allow: c 188:* rwm
-lxc.cgroup2.devices.allow: c 189:* rwm
-lxc.mount.entry: /dev/serial/by-id  dev/serial/by-id  none bind,optional,create=dir
-lxc.mount.entry: /dev/ttyUSB0       dev/ttyUSB0       none bind,optional,create=file
-lxc.mount.entry: /dev/ttyUSB1       dev/ttyUSB1       none bind,optional,create=file
-lxc.mount.entry: /dev/ttyACM0       dev/ttyACM0       none bind,optional,create=file
-lxc.mount.entry: /dev/ttyACM1       dev/ttyACM1       none bind,optional,create=file
-EOF
-  fi
-
-  # This starts the container and executes your custom install script
-  msg_info "Starting LXC Container"
-  pct start "$CTID"
-  msg_ok "Started LXC Container"
-  if [ "$var_os" == "alpine" ]; then
-    sleep 3
-    pct exec "$CTID" -- /bin/sh -c 'cat <<EOF >/etc/apk/repositories
-http://dl-cdn.alpinelinux.org/alpine/latest-stable/main
-http://dl-cdn.alpinelinux.org/alpine/latest-stable/community
-EOF'
-    pct exec "$CTID" -- ash -c "apk add bash >/dev/null"
-  fi
-  
-  # THIS IS THE KEY CHANGE: Use your fork's install script directly
-  lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/troymroberts/ProxmoxVE/main/install/odoo-install.sh)" $?
-}
-
-# Replace the build_container function
-build_container() {
-  build_container_original
-}
-
-build_container
-description
-
-msg_ok "Completed Successfully!\n"
-echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
-echo -e "${INFO}${YW} Access it using the following URL:${CL}"
-echo -e "${TAB}${GATEWAY}${BGN}http://${IP}:8069${CL}"
+# The main helper script calls this function
+start_script
