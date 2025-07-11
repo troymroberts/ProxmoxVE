@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
+
+# Patch the build.func to use your custom install script
+BUILD_FUNC_CONTENT=$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
+echo "$BUILD_FUNC_CONTENT" | sed 's|https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/${var_install}.sh|https://raw.githubusercontent.com/troymroberts/ProxmoxVE/main/install/odoo-install.sh|g' > /tmp/patched_build.func
+source /tmp/patched_build.func
 
 # Copyright (c) 2021-2025 community-scripts ORG
 # Author: MickLesk (CanbiZ) - Modified for Enterprise Edition Support
@@ -14,9 +18,6 @@ var_disk="${var_disk:-20}"
 var_os="${var_os:-debian}"
 var_version="${var_version:-12}"
 var_unprivileged="${var_unprivileged:-1}"
-
-# Override the installation script variable to point to your fork
-var_install="troymroberts-odoo-install"
 
 header_info "$APP"
 variables
@@ -74,91 +75,6 @@ function update_script() {
 }
 
 start
-
-# Override build_container to use your fork
-function build_container() {
-  if [ "$CT_TYPE" == "1" ]; then
-    FEATURES="keyctl=1,nesting=1"
-  else
-    FEATURES="nesting=1"
-  fi
-
-  if [[ $DIAGNOSTICS == "yes" ]]; then
-    post_to_api
-  fi
-
-  TEMP_DIR=$(mktemp -d)
-  pushd "$TEMP_DIR" >/dev/null
-  if [ "$var_os" == "alpine" ]; then
-    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/alpine-install.func)"
-  else
-    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/install.func)"
-  fi
-  export RANDOM_UUID="$RANDOM_UUID"
-  export CACHER="$APT_CACHER"
-  export CACHER_IP="$APT_CACHER_IP"
-  export tz="$timezone"
-  export DISABLEIPV6="$DISABLEIP6"
-  export APPLICATION="$APP"
-  export app="$NSAPP"
-  export PASSWORD="$PW"
-  export VERBOSE="$VERB"
-  export SSH_ROOT="${SSH}"
-  export SSH_AUTHORIZED_KEY
-  export CTID="$CT_ID"
-  export CTTYPE="$CT_TYPE"
-  export PCT_OSTYPE="$var_os"
-  export PCT_OSVERSION="$var_version"
-  export PCT_DISK_SIZE="$DISK_SIZE"
-  export PCT_OPTIONS="
-    -features $FEATURES
-    -hostname $HN
-    -tags $TAGS
-    $SD
-    $NS
-    -net0 name=eth0,bridge=$BRG$MAC,ip=$NET$GATE$VLAN$MTU
-    -onboot 1
-    -cores $CORE_COUNT
-    -memory $RAM_SIZE
-    -unprivileged $CT_TYPE
-    $PW
-  "
-  # This executes create_lxc.sh and creates the container and .conf file
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/create_lxc.sh)" $?
-
-  LXC_CONFIG=/etc/pve/lxc/${CTID}.conf
-  if [ "$CT_TYPE" == "0" ]; then
-    cat <<EOF >>"$LXC_CONFIG"
-# USB passthrough
-lxc.cgroup2.devices.allow: a
-lxc.cap.drop:
-lxc.cgroup2.devices.allow: c 188:* rwm
-lxc.cgroup2.devices.allow: c 189:* rwm
-lxc.mount.entry: /dev/serial/by-id  dev/serial/by-id  none bind,optional,create=dir
-lxc.mount.entry: /dev/ttyUSB0       dev/ttyUSB0       none bind,optional,create=file
-lxc.mount.entry: /dev/ttyUSB1       dev/ttyUSB1       none bind,optional,create=file
-lxc.mount.entry: /dev/ttyACM0       dev/ttyACM0       none bind,optional,create=file
-lxc.mount.entry: /dev/ttyACM1       dev/ttyACM1       none bind,optional,create=file
-EOF
-  fi
-
-  # This starts the container and executes your custom install script
-  msg_info "Starting LXC Container"
-  pct start "$CTID"
-  msg_ok "Started LXC Container"
-  if [ "$var_os" == "alpine" ]; then
-    sleep 3
-    pct exec "$CTID" -- /bin/sh -c 'cat <<EOF >/etc/apk/repositories
-http://dl-cdn.alpinelinux.org/alpine/latest-stable/main
-http://dl-cdn.alpinelinux.org/alpine/latest-stable/community
-EOF'
-    pct exec "$CTID" -- ash -c "apk add bash >/dev/null"
-  fi
-  
-  # Use your fork's install script
-  lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/troymroberts/ProxmoxVE/main/install/odoo-install.sh)" $?
-}
-
 build_container
 description
 
